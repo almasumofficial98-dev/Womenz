@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/privacy/secure_storage_service.dart';
+import '../../services/local_db_service.dart';
 import '../../models/user_profile.dart';
 import '../../theme/app_theme.dart';
 
@@ -135,14 +138,39 @@ class _PrivacySecurityScreenState extends State<PrivacySecurityScreen> {
                     Text('Export full health history in clinician-friendly or portable formats', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 12, color: AppTheme.textSecondary)),
                     const SizedBox(height: 16),
                     ListTile(
-                      leading: const Icon(Icons.picture_as_pdf_rounded, color: AppTheme.primaryPink),
-                      title: Text('Export Doctor Summary (PDF)', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 13, fontWeight: FontWeight.w700)),
-                      onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generating PDF Report...'))),
+                      leading: const Icon(Icons.table_chart_rounded, color: AppTheme.primaryBlue),
+                      title: const Text('Export Data as CSV (Spreadsheet)', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 13, fontWeight: FontWeight.w700)),
+                      subtitle: const Text('Copies full FIGO cycle & symptoms log as CSV', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                      onTap: () async {
+                        final csv = await LocalDbService.exportCsvData();
+                        await Clipboard.setData(ClipboardData(text: csv));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('CSV data copied to clipboard! Ready to paste into Excel/Sheets.')),
+                          );
+                        }
+                      },
                     ),
                     ListTile(
-                      leading: const Icon(Icons.table_chart_rounded, color: AppTheme.primaryBlue),
-                      title: Text('Export Personal Health Records (CSV / JSON)', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 13, fontWeight: FontWeight.w700)),
-                      onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Exporting CSV & JSON...'))),
+                      leading: const Icon(Icons.cloud_download_rounded, color: AppTheme.primaryPurple),
+                      title: const Text('Export Full Backup (JSON)', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 13, fontWeight: FontWeight.w700)),
+                      subtitle: const Text('Complete portable database snapshot', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                      onTap: () async {
+                        final snapshot = await LocalDbService.exportFullSnapshot();
+                        final jsonStr = jsonEncode(snapshot);
+                        await Clipboard.setData(ClipboardData(text: jsonStr));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Complete JSON backup copied to clipboard!')),
+                          );
+                        }
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.restore_page_rounded, color: Color(0xFF2E7D32)),
+                      title: const Text('Restore from Backup (JSON)', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 13, fontWeight: FontWeight.w700)),
+                      subtitle: const Text('Restore previously exported Womenz data', style: TextStyle(fontSize: 11, color: AppTheme.textSecondary)),
+                      onTap: () => _showRestoreDialog(context),
                     ),
                   ],
                 ),
@@ -197,6 +225,60 @@ class _PrivacySecurityScreenState extends State<PrivacySecurityScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showRestoreDialog(BuildContext context) {
+    final textCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Restore JSON Backup', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontWeight: FontWeight.w800)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Paste your exported Womenz JSON backup below to restore your records:', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: textCtrl,
+              maxLines: 4,
+              decoration: InputDecoration(
+                hintText: 'Paste {"profile": ...} here',
+                filled: true,
+                fillColor: AppTheme.surfaceLight,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                final data = jsonDecode(textCtrl.text) as Map<String, dynamic>;
+                final ok = await LocalDbService.importFullSnapshot(data);
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(ok ? 'Backup successfully restored!' : 'Failed to parse backup format.')),
+                  );
+                }
+              } catch (e) {
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Invalid JSON backup content.')),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryPink),
+            child: const Text('Restore'),
+          ),
+        ],
       ),
     );
   }

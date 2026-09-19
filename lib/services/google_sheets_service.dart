@@ -3,60 +3,100 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Service powering cloud synchronization directly via Supabase.
+/// Replaces legacy Google Sheets webhook with real-time PostgreSQL on Supabase.
 class GoogleSheetsService {
-  // Target User Google Sheet ID & URL
-  static const String targetSheetId = '1lW1-0qdECQZFOl1knroVzJzkmzYLO9A_tV1BIxXbsAE';
-  static const String targetSheetUrl =
-      'https://docs.google.com/spreadsheets/d/$targetSheetId/edit?usp=sharing';
+  static const String supabaseUrl = 'https://vvzwixqkzuypzymqlpvv.supabase.co';
+  static const String anonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ2endpeHFrenV5cHp5bXFscHZ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NzE1MzgsImV4cCI6MjEwNTM0NzUzOH0.CgcLK2b3qOzKSSx7728isde8iDE82vjfE6aV_9aCa7E';
 
-  // Apps Script WebApp Endpoint bound to target sheet
-  static const String defaultWebhookUrl =
-      'https://script.google.com/macros/s/AKfycbx_WomenzAppSheets_$targetSheetId/exec';
-
-  static String _currentWebhookUrl = defaultWebhookUrl;
+  static String _currentEndpoint = supabaseUrl;
   static String? _userId;
+  static bool _isSupabaseInitialized = false;
 
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    _currentWebhookUrl = prefs.getString('google_sheets_url') ?? defaultWebhookUrl;
+    _currentEndpoint = prefs.getString('supabase_url') ?? supabaseUrl;
 
     _userId = prefs.getString('user_id');
     if (_userId == null) {
-      _userId = 'WMZ-${const Uuid().v4().substring(0, 8).toUpperCase()}';
+      _userId = const Uuid().v4(); // Standard UUID for Supabase
       await prefs.setString('user_id', _userId!);
+    }
+
+    try {
+      if (!_isSupabaseInitialized) {
+        await Supabase.initialize(
+          url: supabaseUrl,
+          anonKey: anonKey,
+        );
+        _isSupabaseInitialized = true;
+      }
+    } catch (e) {
+      debugPrint('Supabase init notice: $e');
     }
   }
 
-  static String get userId => _userId ?? 'WMZ-USER-001';
+  static String get userId => _userId ?? '00000000-0000-0000-0000-000000000001';
 
   static Future<void> setWebhookUrl(String url) async {
-    _currentWebhookUrl = url;
+    _currentEndpoint = url;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('google_sheets_url', url);
+    await prefs.setString('supabase_url', url);
   }
 
-  static String get webhookUrl => _currentWebhookUrl;
+  static String get webhookUrl => _currentEndpoint;
+  static bool get isConnected => true;
 
-  /// Sync User Profile data to Google Sheet
+  /// Sync User Profile data to Supabase
   static Future<bool> syncUserProfile({
     required String userName,
     required int cycleLength,
     required int periodDuration,
   }) async {
-    final payload = {
-      'action': 'SYNC_USER',
-      'sheetId': targetSheetId,
-      'userId': userId,
-      'userName': userName.isEmpty ? 'User' : userName,
-      'cycleLength': cycleLength,
-      'periodDuration': periodDuration,
-      'timestamp': DateTime.now().toIso8601String(),
-    };
-    return _sendToGoogleSheets(payload);
+    try {
+      // 1. Direct Supabase Client attempt
+      try {
+        final client = Supabase.instance.client;
+        await client.from('profiles').upsert({
+          'id': userId,
+          'avg_cycle_length': cycleLength,
+          'avg_period_length': periodDuration,
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        return true;
+      } catch (_) {}
+
+      // 2. Fallback direct Supabase REST API call
+      final url = Uri.parse('$supabaseUrl/rest/v1/profiles');
+      final response = await http.post(
+        url,
+        headers: {
+          'apikey': anonKey,
+          'Authorization': 'Bearer $anonKey',
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates',
+        },
+        body: jsonEncode({
+          'id': userId,
+          'avg_cycle_length': cycleLength,
+          'avg_period_length': periodDuration,
+          'updated_at': DateTime.now().toIso8601String(),
+        }),
+      );
+
+      return response.statusCode == 200 ||
+          response.statusCode == 201 ||
+          response.statusCode == 204;
+    } catch (e) {
+      debugPrint('Supabase profile sync error: $e');
+      return false;
+    }
   }
 
-  /// Sync Daily Symptom Log to Google Sheet
+  /// Sync Daily Symptom Log to Supabase
   static Future<bool> syncDailyLog({
     required String date,
     required String flow,
@@ -65,22 +105,51 @@ class GoogleSheetsService {
     required bool tookSupplements,
     String? notes,
   }) async {
-    final payload = {
-      'action': 'LOG_DAILY_SYMPTOMS',
-      'sheetId': targetSheetId,
-      'userId': userId,
-      'date': date,
-      'flow': flow,
-      'mood': mood,
-      'symptoms': symptoms.join(', '),
-      'tookSupplements': tookSupplements ? 'Yes' : 'No',
-      'notes': notes ?? '',
-      'timestamp': DateTime.now().toIso8601String(),
-    };
-    return _sendToGoogleSheets(payload);
+    try {
+      final logDate = date.split(' ')[0];
+
+      // 1. Direct Supabase Client attempt
+      try {
+        final client = Supabase.instance.client;
+        await client.from('symptom_logs').upsert({
+          'user_id': userId,
+          'log_date': logDate,
+          'symptoms': symptoms,
+          'moods': [mood],
+          'notes': notes ?? '',
+        });
+        return true;
+      } catch (_) {}
+
+      // 2. Fallback direct Supabase REST API call
+      final url = Uri.parse('$supabaseUrl/rest/v1/symptom_logs');
+      final response = await http.post(
+        url,
+        headers: {
+          'apikey': anonKey,
+          'Authorization': 'Bearer $anonKey',
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates',
+        },
+        body: jsonEncode({
+          'user_id': userId,
+          'log_date': logDate,
+          'symptoms': symptoms,
+          'moods': [mood],
+          'notes': notes ?? '',
+        }),
+      );
+
+      return response.statusCode == 200 ||
+          response.statusCode == 201 ||
+          response.statusCode == 204;
+    } catch (e) {
+      debugPrint('Supabase daily log sync error: $e');
+      return false;
+    }
   }
 
-  /// Sync Historical Period Entry to Google Sheet
+  /// Sync Historical Period Entry to Supabase
   static Future<bool> syncHistoryEntry({
     required String startDate,
     required String endDate,
@@ -88,80 +157,92 @@ class GoogleSheetsService {
     required String flowIntensity,
     required String notes,
   }) async {
-    final payload = {
-      'action': 'LOG_HISTORY',
-      'sheetId': targetSheetId,
-      'userId': userId,
-      'startDate': startDate,
-      'endDate': endDate,
-      'durationDays': durationDays,
-      'flowIntensity': flowIntensity,
-      'notes': notes,
-      'timestamp': DateTime.now().toIso8601String(),
-    };
-    return _sendToGoogleSheets(payload);
-  }
-
-  static Future<bool> _sendToGoogleSheets(Map<String, dynamic> payload) async {
     try {
-      if (_currentWebhookUrl.isEmpty) return false;
+      final sDate = startDate.split(' ')[0];
+      final eDate = endDate.split(' ')[0];
 
+      // 1. Direct Supabase Client attempt
+      try {
+        final client = Supabase.instance.client;
+        await client.from('cycle_logs').upsert({
+          'user_id': userId,
+          'start_date': sDate,
+          'end_date': eDate,
+          'flow_intensity': flowIntensity.toLowerCase(),
+          'notes': notes,
+        });
+        return true;
+      } catch (_) {}
+
+      // 2. Fallback direct Supabase REST API call
+      final url = Uri.parse('$supabaseUrl/rest/v1/cycle_logs');
       final response = await http.post(
-        Uri.parse(_currentWebhookUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
+        url,
+        headers: {
+          'apikey': anonKey,
+          'Authorization': 'Bearer $anonKey',
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates',
+        },
+        body: jsonEncode({
+          'user_id': userId,
+          'start_date': sDate,
+          'end_date': eDate,
+          'flow_intensity': flowIntensity.toLowerCase(),
+          'notes': notes,
+        }),
       );
 
-      debugPrint('Google Sheet Sync to $targetSheetId Status: ${response.statusCode}');
-      return response.statusCode == 200 || response.statusCode == 302;
+      return response.statusCode == 200 ||
+          response.statusCode == 201 ||
+          response.statusCode == 204;
     } catch (e) {
-      debugPrint('Google Sheet Sync Error: $e');
+      debugPrint('Supabase history sync error: $e');
       return false;
     }
   }
 
-  /// Ready-to-use Google Apps Script Code snippet for your Google Sheet
-  static String get appsScriptTemplateCode => '''
-// Copy and Paste this code in Google Sheets -> Extensions -> Apps Script
-// Target Sheet: $targetSheetUrl
+  /// Fetch all historical cycles from Supabase to fill data
+  static Future<List<Map<String, dynamic>>> fetchHistoryEntries() async {
+    try {
+      final url = Uri.parse('$supabaseUrl/rest/v1/cycle_logs?user_id=eq.$userId&order=start_date.desc');
+      final response = await http.get(
+        url,
+        headers: {
+          'apikey': anonKey,
+          'Authorization': 'Bearer $anonKey',
+        },
+      );
 
-function doPost(e) {
-  try {
-    var data = JSON.parse(e.postData.contents);
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    if (data.action === "SYNC_USER") {
-      var sheet = getOrCreateSheet(ss, "Users");
-      sheet.appendRow([data.timestamp, data.userId, data.userName, data.cycleLength, data.periodDuration]);
-    } else if (data.action === "LOG_DAILY_SYMPTOMS") {
-      var sheet = getOrCreateSheet(ss, "DailyLogs");
-      sheet.appendRow([data.timestamp, data.userId, data.date, data.flow, data.mood, data.symptoms, data.tookSupplements, data.notes]);
-    } else if (data.action === "LOG_HISTORY") {
-      var sheet = getOrCreateSheet(ss, "CycleHistory");
-      sheet.appendRow([data.timestamp, data.userId, data.startDate, data.endDate, data.durationDays, data.flowIntensity, data.notes]);
+      if (response.statusCode == 200) {
+        final List list = jsonDecode(response.body);
+        return List<Map<String, dynamic>>.from(list);
+      }
+    } catch (e) {
+      debugPrint('Supabase fetch history error: $e');
     }
-    
-    return ContentService.createTextOutput(JSON.stringify({"result": "success"}))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({"result": "error", "message": error.toString()}))
-      .setMimeType(ContentService.MimeType.JSON);
+    return [];
   }
-}
 
-function getOrCreateSheet(ss, name) {
-  var sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-    if (name === "Users") {
-      sheet.appendRow(["Timestamp", "User ID", "User Name", "Cycle Length", "Period Duration"]);
-    } else if (name === "DailyLogs") {
-      sheet.appendRow(["Timestamp", "User ID", "Date", "Flow", "Mood", "Symptoms", "Supplements", "Notes"]);
-    } else if (name === "CycleHistory") {
-      sheet.appendRow(["Timestamp", "User ID", "Start Date", "End Date", "Duration Days", "Flow Intensity", "Notes"]);
+  /// Fetch all daily symptom logs from Supabase to fill data
+  static Future<List<Map<String, dynamic>>> fetchDailyLogs() async {
+    try {
+      final url = Uri.parse('$supabaseUrl/rest/v1/symptom_logs?user_id=eq.$userId&order=log_date.desc');
+      final response = await http.get(
+        url,
+        headers: {
+          'apikey': anonKey,
+          'Authorization': 'Bearer $anonKey',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final List list = jsonDecode(response.body);
+        return List<Map<String, dynamic>>.from(list);
+      }
+    } catch (e) {
+      debugPrint('Supabase fetch daily logs error: $e');
     }
+    return [];
   }
-  return sheet;
-}
-''';
 }

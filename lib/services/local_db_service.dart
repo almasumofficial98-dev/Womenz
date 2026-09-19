@@ -136,6 +136,20 @@ class LocalDbService {
     return await db.query('cycle_history', orderBy: 'startDate DESC');
   }
 
+  // Delete Cycle History entry locally
+  static Future<void> deleteHistoryEntry(String id) async {
+    final db = await database;
+    if (db == null) return;
+    await db.delete('cycle_history', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Delete Daily Log entry locally
+  static Future<void> deleteDailyLog(String dateKey) async {
+    final db = await database;
+    if (db == null) return;
+    await db.delete('daily_logs', where: 'date = ?', whereArgs: [dateKey]);
+  }
+
   // Export full SQLite Database snapshot as JSON for encrypted backup
   static Future<Map<String, dynamic>> exportFullSnapshot() async {
     final db = await database;
@@ -150,5 +164,75 @@ class LocalDbService {
       'cycle_history': history,
       'exported_at': DateTime.now().toIso8601String(),
     };
+  }
+
+  // Export full data formatted as CSV strings for spreadsheet / clinical import
+  static Future<String> exportCsvData() async {
+    final db = await database;
+    if (db == null) return 'Date,Flow,Mood,Symptoms,Notes\n';
+
+    final logs = await db.query('daily_logs', orderBy: 'date DESC');
+    final history = await db.query('cycle_history', orderBy: 'startDate DESC');
+
+    final buffer = StringBuffer();
+    buffer.writeln('# WOMENZ DATA EXPORT (FIGO / CLINICAL FORMAT)');
+    buffer.writeln('# Export Date: ${DateTime.now().toIso8601String()}');
+    buffer.writeln('');
+    buffer.writeln('=== CYCLE HISTORY ===');
+    buffer.writeln('Start Date,End Date,Duration (Days),Flow Intensity,Notes');
+    for (final row in history) {
+      buffer.writeln(
+        '${row['startDate']},${row['endDate'] ?? ''},${row['durationDays']},"${row['flowIntensity'] ?? ''}","${(row['notes'] ?? '').toString().replaceAll('"', '""')}"',
+      );
+    }
+
+    buffer.writeln('');
+    buffer.writeln('=== DAILY SYMPTOM & WELLNESS LOGS ===');
+    buffer.writeln('Date,Flow,Mood,Symptoms,Supplements,Notes');
+    for (final row in logs) {
+      buffer.writeln(
+        '${row['date']},${row['flow'] ?? ''},${row['mood'] ?? ''},"${row['symptoms'] ?? ''}",${row['tookSupplements'] == 1 ? 'Yes' : 'No'},"${(row['notes'] ?? '').toString().replaceAll('"', '""')}"',
+      );
+    }
+
+    return buffer.toString();
+  }
+
+  // Restore SQLite Database from an exported JSON snapshot
+  static Future<bool> importFullSnapshot(Map<String, dynamic> data) async {
+    final db = await database;
+    if (db == null) return false;
+
+    try {
+      await db.transaction((txn) async {
+        final profileList = data['profile'] ?? data['user_profile'];
+        if (profileList is List) {
+          for (final item in profileList) {
+            if (item is Map<String, dynamic>) {
+              await txn.insert('user_profile', item, conflictAlgorithm: ConflictAlgorithm.replace);
+            }
+          }
+        }
+
+        if (data['daily_logs'] is List) {
+          for (final item in (data['daily_logs'] as List)) {
+            if (item is Map<String, dynamic>) {
+              await txn.insert('daily_logs', item, conflictAlgorithm: ConflictAlgorithm.replace);
+            }
+          }
+        }
+
+        if (data['cycle_history'] is List) {
+          for (final item in (data['cycle_history'] as List)) {
+            if (item is Map<String, dynamic>) {
+              await txn.insert('cycle_history', item, conflictAlgorithm: ConflictAlgorithm.replace);
+            }
+          }
+        }
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 }

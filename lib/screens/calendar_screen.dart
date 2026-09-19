@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/cycle_model.dart';
 import '../theme/app_theme.dart';
 import '../widgets/interactive_bouncy_card.dart';
@@ -26,8 +27,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
   @override
   void initState() {
     super.initState();
-    currentMonth = DateTime(2026, 9, 1);
-    selectedDay = DateTime.now().day;
+    final now = DateTime.now();
+    currentMonth = DateTime(now.year, now.month, 1);
+    selectedDay = now.day;
   }
 
   void _nextMonth() {
@@ -40,6 +42,21 @@ class _CalendarScreenState extends State<CalendarScreen> {
     setState(() {
       currentMonth = DateTime(currentMonth.year, currentMonth.month - 1, 1);
     });
+  }
+
+  bool _isPeriodDate(DateTime d) {
+    final key = d.toString().split(' ')[0];
+    final log = widget.cycleData.logs[key];
+    if (log != null && log.flow != null && log.flow != 'None') {
+      return true;
+    }
+    if (widget.cycleData.lastPeriodStartDate != null) {
+      final diff = d.difference(widget.cycleData.lastPeriodStartDate!).inDays;
+      if (diff >= 0 && diff < widget.cycleData.periodDuration) {
+        return true;
+      }
+    }
+    return false;
   }
 
   final List<String> monthNames = [
@@ -66,10 +83,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Cycle Calendar',
-                    style: TextStyle(
+                    widget.cycleData.isDiscreetMode ? 'Cycle Calendar' : 'Period & Cycle Calendar',
+                    style: const TextStyle(
                       fontFamily: 'Plus Jakarta Sans',
-                      fontSize: 24,
+                      fontSize: 22,
                       fontWeight: FontWeight.w800,
                       color: AppTheme.textPrimary,
                     ),
@@ -162,8 +179,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       const Icon(Icons.history_edu_rounded, color: Colors.white, size: 20),
                       const SizedBox(width: 10),
                       Text(
-                        'Log Past Period / Fill History',
-                        style: TextStyle(
+                        widget.cycleData.isDiscreetMode ? 'Log Past Cycle / Fill History' : 'Log Past Period / Fill History',
+                        style: const TextStyle(
                           fontFamily: 'Plus Jakarta Sans',
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
@@ -191,10 +208,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _buildLegendDot('Period', AppTheme.primaryPink),
-                        _buildLegendDot('Predicted', AppTheme.softPink),
-                        _buildLegendDot('Fertile Window', AppTheme.primaryBlue),
-                        _buildLegendDot('Ovulation', AppTheme.primaryPurple),
+                        _buildLegendDot(widget.cycleData.isDiscreetMode ? 'Phase' : 'Logged Period', AppTheme.primaryPink),
+                        _buildLegendDot(widget.cycleData.isDiscreetMode ? 'Estimated' : 'Estimated Period', AppTheme.softPink),
+                        _buildLegendDot('Logged Symptoms', Colors.deepOrange),
                       ],
                     ),
 
@@ -208,7 +224,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                 child: Text(
                                   day,
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontFamily: 'Plus Jakarta Sans',
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
@@ -239,29 +255,52 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         final dayNum = index - firstWeekday + 1;
                         final isSelected = (dayNum == selectedDay);
 
-                        final isPeriod = widget.cycleData.hasLoggedData && (dayNum >= 1 && dayNum <= 5);
-                        final isFertile = widget.cycleData.hasLoggedData && (dayNum >= 12 && dayNum <= 16);
-                        final isOvulation = widget.cycleData.hasLoggedData && (dayNum == 14);
+                        final cellDate = DateTime(currentMonth.year, currentMonth.month, dayNum);
+                        final cellDateKey = cellDate.toString().split(' ')[0];
+                        final dayLog = widget.cycleData.logs[cellDateKey];
+
+                        final isPeriod = _isPeriodDate(cellDate);
+                        final prevIsPeriod = _isPeriodDate(cellDate.subtract(const Duration(days: 1)));
+                        final nextIsPeriod = _isPeriodDate(cellDate.add(const Duration(days: 1)));
+
+                        // Estimated next period window based on past cycle length
+                        bool isEstimatedPeriod = false;
+                        if (widget.cycleData.nextPeriodDate != null && cellDate.isAfter(DateTime.now())) {
+                          final nextStart = widget.cycleData.nextPeriodDate!;
+                          final diffFromNext = cellDate.difference(nextStart).inDays;
+                          if (diffFromNext >= 0 && diffFromNext < widget.cycleData.periodDuration) {
+                            isEstimatedPeriod = true;
+                          }
+                        }
 
                         Color cellBg = Colors.transparent;
                         Color textColor = AppTheme.textPrimary;
                         Border? border;
 
-                        if (isPeriod) {
-                          cellBg = AppTheme.softPink;
-                          textColor = AppTheme.primaryPink;
-                        } else if (isFertile) {
-                          cellBg = AppTheme.softBlue;
-                          textColor = AppTheme.primaryBlue;
-                        }
-
+                        BorderRadius cellRadius;
                         if (isSelected) {
                           cellBg = AppTheme.primaryPink;
                           textColor = Colors.white;
-                        }
-
-                        if (isOvulation && !isSelected) {
-                          border = Border.all(color: AppTheme.primaryPurple, width: 2);
+                          cellRadius = BorderRadius.circular(16);
+                        } else if (isPeriod) {
+                          cellBg = AppTheme.softPink;
+                          textColor = AppTheme.primaryPink;
+                          if (prevIsPeriod && nextIsPeriod) {
+                            cellRadius = BorderRadius.zero;
+                          } else if (!prevIsPeriod && nextIsPeriod) {
+                            cellRadius = const BorderRadius.horizontal(left: Radius.circular(16));
+                          } else if (prevIsPeriod && !nextIsPeriod) {
+                            cellRadius = const BorderRadius.horizontal(right: Radius.circular(16));
+                          } else {
+                            cellRadius = BorderRadius.circular(16);
+                          }
+                        } else if (isEstimatedPeriod) {
+                          cellBg = const Color(0xFFFFF0F3);
+                          textColor = AppTheme.primaryPink;
+                          border = Border.all(color: AppTheme.primaryPink.withValues(alpha: 0.4), width: 1.2);
+                          cellRadius = BorderRadius.circular(16);
+                        } else {
+                          cellRadius = BorderRadius.circular(16);
                         }
 
                         return BouncyTapCard(
@@ -274,12 +313,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
                             duration: const Duration(milliseconds: 180),
                             decoration: BoxDecoration(
                               color: cellBg,
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: cellRadius,
                               border: border,
                               boxShadow: isSelected
                                   ? [
                                       BoxShadow(
-                                        color: AppTheme.primaryPink.withOpacity(0.3),
+                                        color: AppTheme.primaryPink.withValues(alpha: 0.3),
                                         blurRadius: 8,
                                         offset: const Offset(0, 3),
                                       ),
@@ -287,16 +326,33 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                   : null,
                             ),
                             child: Center(
-                              child: Text(
-                                '$dayNum',
-                                style: TextStyle(
-                                  fontFamily: 'Plus Jakarta Sans',
-                                  fontSize: 14,
-                                  fontWeight: (isPeriod || isFertile || isSelected)
-                                      ? FontWeight.w800
-                                      : FontWeight.w500,
-                                  color: textColor,
-                                ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    '$dayNum',
+                                    style: TextStyle(
+                                      fontFamily: 'Plus Jakarta Sans',
+                                      fontSize: 13,
+                                      fontWeight: (isPeriod || isEstimatedPeriod || isSelected)
+                                          ? FontWeight.w800
+                                          : FontWeight.w500,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  if (dayLog != null && (dayLog.painScale > 0 || dayLog.tookSupplements))
+                                    Container(
+                                      margin: const EdgeInsets.only(top: 2),
+                                      width: 4,
+                                      height: 4,
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? Colors.white
+                                            : (dayLog.painScale >= 8 ? Colors.red : Colors.deepOrange),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           ),
@@ -305,6 +361,107 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     ),
                   ],
                 ),
+              ),
+              const SizedBox(height: 20),
+
+              // Selected Day Details Card
+              Builder(
+                builder: (context) {
+                  final selDate = DateTime(currentMonth.year, currentMonth.month, selectedDay);
+                  final selKey = selDate.toString().split(' ')[0];
+                  final log = widget.cycleData.logs[selKey];
+
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: AppTheme.cardDecoration(
+                      color: Colors.white,
+                      radius: 24,
+                      shadows: AppTheme.softShadow(opacity: 0.04),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              DateFormat('EEEE, MMMM d').format(selDate),
+                              style: const TextStyle(
+                                fontFamily: 'Plus Jakarta Sans',
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () {
+                                showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  backgroundColor: Colors.transparent,
+                                  builder: (ctx) => SymptomLoggerModal(
+                                    initialLog: log ?? DailyLog(date: selDate),
+                                    onSave: (newLog) {
+                                      widget.onLogAdded(newLog);
+                                      setState(() {});
+                                    },
+                                  ),
+                                );
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.softPink,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  log != null ? 'Edit Log' : '+ Log Date',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.primaryPink,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (log == null)
+                          const Text(
+                            'No symptoms or flow logged for this day.',
+                            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                          )
+                        else
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              if (log.flow != null)
+                                _buildDetailPill('Flow: ${log.flow}', AppTheme.primaryPink, AppTheme.softPink),
+                              if (log.painScale > 0)
+                                _buildDetailPill('Pain: ${log.painScale}/10', Colors.deepOrange, const Color(0xFFFFEBE6)),
+                              if (log.mood != null)
+                                _buildDetailPill('Mood: ${log.mood}', AppTheme.primaryPurple, AppTheme.softLavender),
+                              if (log.medications.isNotEmpty)
+                                _buildDetailPill('Meds: ${log.medications.join(", ")}', AppTheme.primaryBlue, AppTheme.softBlue)
+                              else if (log.tookSupplements)
+                                _buildDetailPill('Medication Logged', AppTheme.primaryBlue, AppTheme.softBlue),
+                              if (log.selfCare.isNotEmpty)
+                                _buildDetailPill('Care: ${log.selfCare.join(", ")}', const Color(0xFF2E7D32), const Color(0xFFE8F5E9)),
+                              if (log.cervicalMucus != null)
+                                _buildDetailPill('Mucus: ${log.cervicalMucus}', const Color(0xFF5C6BC0), const Color(0xFFEDE7F6)),
+                              if (log.bbt != null)
+                                _buildDetailPill('BBT: ${log.bbt}°C', const Color(0xFF00897B), const Color(0xFFE0F2F1)),
+                              if (log.tookInositol)
+                                _buildDetailPill('Inositol Taken', const Color(0xFF8E24AA), const Color(0xFFF3E5F5)),
+                            ],
+                          ),
+                      ],
+                    ),
+                  );
+                },
               ),
 
               const SizedBox(height: 20),
@@ -320,7 +477,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                  border: Border.all(color: AppTheme.primaryPink.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   children: [
@@ -338,8 +495,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            widget.cycleData.hasLoggedData ? 'Your next period is predicted to start on:' : 'Cycle Prediction Status',
-                            style: TextStyle(
+                            widget.cycleData.hasLoggedData
+                                ? (widget.cycleData.isDiscreetMode
+                                    ? 'Next cycle estimated around:'
+                                    : 'Your next period is estimated around:')
+                                : 'Cycle Estimate Status',
+                            style: const TextStyle(
                               fontFamily: 'Plus Jakarta Sans',
                               fontSize: 12,
                               color: AppTheme.textSecondary,
@@ -347,12 +508,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            widget.cycleData.hasLoggedData ? 'October 12, 2026' : 'No history logged yet. Fill history to see predictions.',
-                            style: TextStyle(
+                            widget.cycleData.hasLoggedData
+                                ? (widget.cycleData.isPcosOrIrregular
+                                    ? '${DateFormat('MMMM d, yyyy').format(widget.cycleData.nextPeriodDate ?? DateTime.now().add(Duration(days: widget.cycleData.cycleLength)))} (Est. PCOS variance ±7d)'
+                                    : DateFormat('MMMM d, yyyy').format(widget.cycleData.nextPeriodDate ?? DateTime.now().add(Duration(days: widget.cycleData.cycleLength))))
+                                : 'No history logged yet. Tap + to set period start.',
+                            style: const TextStyle(
                               fontFamily: 'Plus Jakarta Sans',
                               fontSize: 14,
                               fontWeight: FontWeight.w800,
                               color: AppTheme.primaryPink,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            'Estimated based on logged history • Non-diagnostic pattern projection',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: AppTheme.textSecondary,
                             ),
                           ),
                         ],
@@ -365,6 +538,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
               const SizedBox(height: 30),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailPill(String label, Color textColor, Color bgColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: textColor,
         ),
       ),
     );

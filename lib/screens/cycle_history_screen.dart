@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 import '../services/google_sheets_service.dart';
+import '../services/local_db_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_themed_date_picker.dart';
 
@@ -31,6 +33,44 @@ class CycleHistoryScreen extends StatefulWidget {
 
 class _CycleHistoryScreenState extends State<CycleHistoryScreen> {
   final List<CycleHistoryEntry> historyList = [];
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    setState(() => isLoading = true);
+    final localEntries = await LocalDbService.getHistoryEntries();
+    final List<CycleHistoryEntry> list = [];
+    for (final row in localEntries) {
+      final sStr = row['startDate']?.toString();
+      final eStr = row['endDate']?.toString();
+      if (sStr != null && eStr != null) {
+        final sDate = DateTime.tryParse(sStr);
+        final eDate = DateTime.tryParse(eStr);
+        if (sDate != null && eDate != null) {
+          list.add(CycleHistoryEntry(
+            startDate: sDate,
+            endDate: eDate,
+            durationDays: (row['durationDays'] as int?) ?? (eDate.difference(sDate).inDays + 1),
+            flowIntensity: row['flowIntensity']?.toString() ?? 'Medium',
+            notes: row['notes']?.toString() ?? '',
+            isSynced: (row['isSynced'] as int?) == 1,
+          ));
+        }
+      }
+    }
+    if (mounted) {
+      setState(() {
+        historyList.clear();
+        historyList.addAll(list);
+        isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +145,7 @@ class _CycleHistoryScreenState extends State<CycleHistoryScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Synced to Google Sheets',
+                            'Synced to Supabase Cloud',
                             style: TextStyle(
                               fontFamily: 'Plus Jakarta Sans',
                               fontSize: 16,
@@ -363,7 +403,7 @@ class _CycleHistoryScreenState extends State<CycleHistoryScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Record past dates to improve cycle predictions & sync to Sheets',
+                  'Record past dates to improve cycle predictions & sync to Supabase',
                   style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 12, color: AppTheme.textSecondary),
                 ),
 
@@ -463,6 +503,10 @@ class _CycleHistoryScreenState extends State<CycleHistoryScreen> {
                   child: ElevatedButton(
                     onPressed: () async {
                       final duration = selectedEnd.difference(selectedStart).inDays + 1;
+                      final id = const Uuid().v4();
+                      final startStr = DateFormat('yyyy-MM-dd').format(selectedStart);
+                      final endStr = DateFormat('yyyy-MM-dd').format(selectedEnd);
+
                       final entry = CycleHistoryEntry(
                         startDate: selectedStart,
                         endDate: selectedEnd,
@@ -478,20 +522,29 @@ class _CycleHistoryScreenState extends State<CycleHistoryScreen> {
 
                       Navigator.pop(context);
 
-                      // Sync to Google Sheets Database
-                      final synced = await GoogleSheetsService.syncHistoryEntry(
-                        startDate: DateFormat('yyyy-MM-dd').format(selectedStart),
-                        endDate: DateFormat('yyyy-MM-dd').format(selectedEnd),
+                      await LocalDbService.saveHistoryEntry(
+                        id: id,
+                        startDate: startStr,
+                        endDate: endStr,
                         durationDays: duration,
                         flowIntensity: flow,
-                        notes: notesCtrl.text,
+                        notes: notesCtrl.text.isEmpty ? 'Past Record' : notesCtrl.text,
+                      );
+
+                      // Sync to Supabase Database
+                      final synced = await GoogleSheetsService.syncHistoryEntry(
+                        startDate: startStr,
+                        endDate: endStr,
+                        durationDays: duration,
+                        flowIntensity: flow,
+                        notes: notesCtrl.text.isEmpty ? 'Past Record' : notesCtrl.text,
                       );
 
                       if (synced) {
                         setState(() => entry.isSynced = true);
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('History logged & synced to Google Sheets!'), backgroundColor: AppTheme.primaryPink),
+                            const SnackBar(content: Text('History logged & synced to Supabase!'), backgroundColor: AppTheme.primaryPink),
                           );
                         }
                       }
@@ -500,7 +553,7 @@ class _CycleHistoryScreenState extends State<CycleHistoryScreen> {
                       backgroundColor: AppTheme.primaryPink,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                     ),
-                    child: Text('Save & Sync to Google Sheets', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
+                    child: Text('Save & Sync to Supabase', style: TextStyle(fontFamily: 'Plus Jakarta Sans', fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
                   ),
                 ),
               ],

@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../models/cycle_model.dart';
 import '../services/google_sheets_service.dart';
 import '../services/periodic_sync_service.dart';
 import '../theme/app_theme.dart';
 import '../models/user_profile.dart';
+import '../services/local_db_service.dart';
 import '../widgets/restore_backup_dialog.dart';
 import 'cycle_history_screen.dart';
 import 'settings/privacy_security_screen.dart';
+import 'doctor_summary_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final UserCycleData cycleData;
@@ -253,18 +254,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             onPressed: isSyncing
                                 ? null
                                 : () async {
+                                    final messenger = ScaffoldMessenger.of(context);
                                     setState(() => isSyncing = true);
                                     final success = await PeriodicSyncService.performPeriodicSync(force: true);
                                     setState(() => isSyncing = false);
 
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(success ? 'AES-256 Encrypted 7-day backup uploaded!' : 'Sync attempted.'),
-                                          backgroundColor: success ? const Color(0xFF0F9D58) : AppTheme.primaryPink,
-                                        ),
-                                      );
-                                    }
+                                    if (!mounted) return;
+                                    messenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text(success ? 'AES-256 Encrypted 7-day backup uploaded!' : 'Sync attempted.'),
+                                        backgroundColor: success ? const Color(0xFF0F9D58) : AppTheme.primaryPink,
+                                      ),
+                                    );
                                   },
                             icon: isSyncing
                                 ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -457,11 +458,434 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
 
+              const SizedBox(height: 14),
+
+              // Discreet Privacy Mode Switch Card
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                decoration: AppTheme.cardDecoration(
+                  color: Colors.white,
+                  radius: 24,
+                  shadows: AppTheme.softShadow(opacity: 0.04),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: widget.cycleData.isDiscreetMode ? AppTheme.softPink : AppTheme.surfaceLight,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        widget.cycleData.isDiscreetMode ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                        color: widget.cycleData.isDiscreetMode ? AppTheme.primaryPink : AppTheme.textPrimary,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Discreet Privacy Mode',
+                            style: TextStyle(
+                              fontFamily: 'Plus Jakarta Sans',
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            'Mask sensitive labels (period, fertility) for safe public viewing',
+                            style: TextStyle(
+                              fontFamily: 'Plus Jakarta Sans',
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      activeTrackColor: AppTheme.softPink,
+                      activeThumbColor: AppTheme.primaryPink,
+                      value: widget.cycleData.isDiscreetMode,
+                      onChanged: (val) {
+                        setState(() {
+                          widget.cycleData.isDiscreetMode = val;
+                        });
+                        widget.onUpdateCycleData(widget.cycleData);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // Cycle Health Focus / Goal Card
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: AppTheme.cardDecoration(
+                  color: Colors.white,
+                  radius: 24,
+                  shadows: AppTheme.softShadow(opacity: 0.04),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.softLavender,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.tune_rounded, color: AppTheme.primaryPurple, size: 22),
+                        ),
+                        const SizedBox(width: 14),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Cycle Health Focus',
+                              style: TextStyle(
+                                fontFamily: 'Plus Jakarta Sans',
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Personalize predictions for your condition',
+                              style: TextStyle(
+                                fontFamily: 'Plus Jakarta Sans',
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildGoalChip('Track & Wellness', 'track', 'regular'),
+                        _buildGoalChip('PCOS / Irregular', 'pcos', 'pcod'),
+                        _buildGoalChip('Conception (TTC)', 'ttc', 'regular'),
+                        _buildGoalChip('Endometriosis Care', 'track', 'endometriosis'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // Reproductive Health Stage Card
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: AppTheme.cardDecoration(
+                  color: Colors.white,
+                  radius: 24,
+                  shadows: AppTheme.softShadow(opacity: 0.04),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFFFF0F3),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.favorite_rounded, color: AppTheme.primaryPink, size: 22),
+                        ),
+                        const SizedBox(width: 14),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Reproductive Health Stage',
+                              style: TextStyle(
+                                fontFamily: 'Plus Jakarta Sans',
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Adapts predictions and advice to your life stage',
+                              style: TextStyle(
+                                fontFamily: 'Plus Jakarta Sans',
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildHealthStageChip('🌸 Natural Cycle', 'reproductive', false),
+                        _buildHealthStageChip('🌿 PCOS / PCOD', 'pcod', false),
+                        _buildHealthStageChip('🌅 Perimenopause', 'perimenopause', false),
+                        _buildHealthStageChip('🤰 Pregnancy Mode', 'pregnancy', true),
+                      ],
+                    ),
+                    if (widget.cycleData.isPregnancyPaused) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0FDF4),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFDCFCE7)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Pregnancy Pause Active',
+                                      style: TextStyle(
+                                        fontFamily: 'Plus Jakarta Sans',
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF166534),
+                                      ),
+                                    ),
+                                    Text(
+                                      widget.cycleData.pregnancyWeeks != null
+                                          ? 'Estimated Week ${widget.cycleData.pregnancyWeeks} Gestation'
+                                          : 'Tap to record LMP / Conception date',
+                                      style: const TextStyle(fontSize: 11, color: Color(0xFF15803D)),
+                                    ),
+                                  ],
+                                ),
+                                TextButton.icon(
+                                  onPressed: _pickPregnancyLmpDate,
+                                  icon: const Icon(Icons.edit_calendar_rounded, size: 16, color: Color(0xFF166534)),
+                                  label: const Text(
+                                    'Set LMP',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Menstrual countdowns are paused. All prior logs are safely preserved.',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // Contraception & Birth Control Card
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: AppTheme.cardDecoration(
+                  color: Colors.white,
+                  radius: 24,
+                  shadows: AppTheme.softShadow(opacity: 0.04),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFEEF2FF),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.medication_liquid_rounded, color: Color(0xFF4F46E5), size: 22),
+                        ),
+                        const SizedBox(width: 14),
+                        const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Contraception & Birth Control',
+                              style: TextStyle(
+                                fontFamily: 'Plus Jakarta Sans',
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Adjusts cycle analysis for hormonal suppression',
+                              style: TextStyle(
+                                fontFamily: 'Plus Jakarta Sans',
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: ContraceptionType.values.map((type) {
+                        final isSelected = widget.cycleData.contraceptionType == type;
+                        return ChoiceChip(
+                          label: Text(type.displayName),
+                          selected: isSelected,
+                          selectedColor: const Color(0xFF4F46E5),
+                          backgroundColor: AppTheme.surfaceLight,
+                          labelStyle: TextStyle(
+                            fontFamily: 'Plus Jakarta Sans',
+                            fontSize: 12,
+                            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                            color: isSelected ? Colors.white : AppTheme.textPrimary,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          onSelected: (selected) {
+                            if (selected) {
+                              setState(() {
+                                widget.cycleData.contraceptionType = type;
+                              });
+                              LocalDbService.saveUserProfile(widget.cycleData);
+                              widget.onUpdateCycleData(widget.cycleData);
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (widget.cycleData.contraceptionType.isHormonalSuppression) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFFDE68A)),
+                        ),
+                        child: const Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline_rounded, color: Color(0xFFD97706), size: 16),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'With hormonal suppression (pill/patch/ring), bleeding during the hormone-free interval is withdrawal bleeding, not physiological ovulatory menstruation.',
+                                style: TextStyle(fontSize: 11, color: Color(0xFF92400E), height: 1.3),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 14),
+
+              // OB-GYN Doctor Clinical Summary Link Card
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DoctorSummaryScreen(cycleData: widget.cycleData),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: AppTheme.cardDecoration(
+                    color: Colors.white,
+                    radius: 24,
+                    shadows: AppTheme.softShadow(opacity: 0.04),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: const BoxDecoration(
+                                color: AppTheme.softBlue,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.medical_services_rounded, color: AppTheme.primaryBlue, size: 22),
+                            ),
+                            const SizedBox(width: 14),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'OB-GYN Clinical Report',
+                                    style: TextStyle(
+                                      fontFamily: 'Plus Jakarta Sans',
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    'Rotterdam PCOS checklist, pain audit & export',
+                                    style: TextStyle(
+                                      fontFamily: 'Plus Jakarta Sans',
+                                      fontSize: 12,
+                                      color: AppTheme.textSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right_rounded, color: AppTheme.textSecondary),
+                    ],
+                  ),
+                ),
+              ),
+
               const SizedBox(height: 24),
 
-              // Google Sheets Endpoint Configuration Card
+              // Supabase Cloud Database Configuration Card
               Text(
-                'Cloud Backup Endpoint Config',
+                'Supabase Cloud Database Config',
                 style: TextStyle(
                   fontFamily: 'Plus Jakarta Sans',
                   fontSize: 15,
@@ -480,37 +904,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFE8F5E9),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.cloud_done_rounded, color: Color(0xFF2E7D32), size: 18),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Supabase Project: vvzwixqkzuypzymqlpvv',
+                          style: TextStyle(
+                            fontFamily: 'Plus Jakarta Sans',
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFF2E7D32),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
                     Text(
-                      'Target Sheet ID: 1lW1-0qdECQZFOl1knroVzJzkmzYLO9A_tV1BIxXbsAE',
+                      'Endpoint: https://vvzwixqkzuypzymqlpvv.supabase.co',
                       style: TextStyle(
                         fontFamily: 'Plus Jakarta Sans',
                         fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: const Color(0xFF0F9D58),
+                        color: AppTheme.textSecondary,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: webhookUrlController,
+                    const SizedBox(height: 12),
+                    Text(
+                      'Active Tables: profiles, cycle_logs, symptom_logs',
                       style: TextStyle(
                         fontFamily: 'Plus Jakarta Sans',
-                        fontSize: 12,
-                        color: AppTheme.textPrimary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primaryPurple,
                       ),
-                      decoration: InputDecoration(
-                        labelText: 'Backup Webhook URL',
-                        labelStyle: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                        filled: true,
-                        fillColor: AppTheme.surfaceLight,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      ),
-                      onChanged: (val) {
-                        GoogleSheetsService.setWebhookUrl(val);
-                      },
                     ),
                   ],
                 ),
@@ -634,4 +1067,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  Widget _buildGoalChip(String label, String intent, String condition) {
+    final isSelected = widget.cycleData.userIntent == intent &&
+        widget.cycleData.healthCondition == condition;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: AppTheme.primaryPurple,
+      backgroundColor: AppTheme.surfaceLight,
+      labelStyle: TextStyle(
+        fontFamily: 'Plus Jakarta Sans',
+        fontSize: 12,
+        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+        color: isSelected ? Colors.white : AppTheme.textPrimary,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      onSelected: (selected) {
+        if (selected) {
+          setState(() {
+            widget.cycleData.userIntent = intent;
+            widget.cycleData.healthCondition = condition;
+          });
+          widget.onUpdateCycleData(widget.cycleData);
+        }
+      },
+    );
+  }
+
+  Widget _buildHealthStageChip(String label, String stage, bool isPregnancy) {
+    final isSelected = isPregnancy
+        ? widget.cycleData.isPregnancyPaused
+        : (!widget.cycleData.isPregnancyPaused && widget.cycleData.healthStage == stage);
+
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: AppTheme.primaryPink,
+      backgroundColor: AppTheme.surfaceLight,
+      labelStyle: TextStyle(
+        fontFamily: 'Plus Jakarta Sans',
+        fontSize: 12,
+        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+        color: isSelected ? Colors.white : AppTheme.textPrimary,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      onSelected: (selected) {
+        if (selected) {
+          setState(() {
+            if (isPregnancy) {
+              widget.cycleData.isPregnancyPaused = true;
+              widget.cycleData.healthStage = 'pregnancy';
+              widget.cycleData.pregnancyStartDate ??= DateTime.now().subtract(const Duration(days: 42));
+            } else {
+              widget.cycleData.isPregnancyPaused = false;
+              widget.cycleData.healthStage = stage;
+              if (stage == 'pcod') {
+                widget.cycleData.healthCondition = 'pcod';
+                widget.cycleData.userIntent = 'pcos';
+              } else {
+                widget.cycleData.healthCondition = 'regular';
+              }
+            }
+          });
+          LocalDbService.saveUserProfile(widget.cycleData);
+          widget.onUpdateCycleData(widget.cycleData);
+        }
+      },
+    );
+  }
+
+  Future<void> _pickPregnancyLmpDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: widget.cycleData.pregnancyStartDate ?? DateTime.now().subtract(const Duration(days: 42)),
+      firstDate: DateTime.now().subtract(const Duration(days: 300)),
+      lastDate: DateTime.now(),
+      helpText: 'Select Last Menstrual Period (LMP) Date',
+    );
+    if (picked != null) {
+      setState(() {
+        widget.cycleData.pregnancyStartDate = picked;
+      });
+      LocalDbService.saveUserProfile(widget.cycleData);
+      widget.onUpdateCycleData(widget.cycleData);
+    }
+  }
 }
+

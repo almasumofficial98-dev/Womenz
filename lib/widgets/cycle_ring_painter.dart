@@ -9,6 +9,7 @@ class CycleRingWidget extends StatefulWidget {
   final int periodDays;
   final CyclePhase currentPhase;
   final bool hasData;
+  final String? subtitle;
   final VoidCallback? onTap;
 
   const CycleRingWidget({
@@ -18,6 +19,7 @@ class CycleRingWidget extends StatefulWidget {
     this.periodDays = 5,
     required this.currentPhase,
     this.hasData = false,
+    this.subtitle,
     this.onTap,
   });
 
@@ -147,7 +149,10 @@ class _CycleRingWidgetState extends State<CycleRingWidget> with SingleTickerProv
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
                           child: Text(
-                            widget.hasData ? '${widget.currentPhase.pregnancyChance} chance of pregnancy' : 'Tap + to log period',
+                            widget.subtitle ??
+                                (widget.hasData
+                                    ? widget.currentPhase.displayName
+                                    : 'Tap + to log period'),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontFamily: 'Plus Jakarta Sans',

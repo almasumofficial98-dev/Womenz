@@ -26,6 +26,23 @@ class AppTheme {
   static const Color textSecondary = Color(0xFF8F9BB3);
   static const Color textMuted = Color(0xFFC5CEE0);
 
+  // Cycle & Phase Color Aliases
+  static const Color primaryViolet = Color(0xFF4A154B);
+  static const Color accentPurple = Color(0xFF7C3AED);
+  static const Color softLavender = Color(0xFFF3E8FF);
+  static const Color cardBg = Color(0xFFFFFFFF);
+  static const Color textDark = Color(0xFF1E1B4B);
+
+  static const Color menstrualRed = Color(0xFFEC4899);
+  static const Color follicularGreen = Color(0xFF10B981);
+  static const Color ovulationTeal = Color(0xFF06B6D4);
+  static const Color lutealAmber = Color(0xFFF59E0B);
+
+  static const Color pcodTagBg = Color(0xFFFEF3C7);
+  static const Color pcodTagText = Color(0xFF92400E);
+  static const Color irregularTagBg = Color(0xFFE0E7FF);
+  static const Color irregularTagText = Color(0xFF3730A3);
+
   // Soft Neumorphic / Glassmorphic Shadow Styles
   static List<BoxShadow> softShadow({Color? shadowColor, double opacity = 0.08, double blur = 20}) {
     return [

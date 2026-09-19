@@ -29,9 +29,7 @@ class HealthScreeningEngine {
     final flaggedSymptoms = <String>[];
 
     // 2. Domain 1: Menstrual Irregularity / Ovulatory Dysfunction
-    bool hasOvulatoryDomain = false;
     if (input.hasIrregularPeriods || input.longestPeriodGapDays >= 35) {
-      hasOvulatoryDomain = true;
       domainsWithIndicators.add('Menstrual Irregularity');
       if (input.longestPeriodGapDays >= 180) {
         flaggedSymptoms.add('Prolonged Period Gap (6+ months)');
@@ -43,7 +41,6 @@ class HealthScreeningEngine {
     }
 
     // 3. Domain 2: Clinical Hyperandrogenism Indicators
-    bool hasAndrogenDomain = false;
     int androgenCount = 0;
 
     if (input.hasAcne) {
@@ -60,15 +57,12 @@ class HealthScreeningEngine {
     }
 
     if (androgenCount >= 1) {
-      hasAndrogenDomain = true;
       domainsWithIndicators.add('Symptoms Associated with Higher Androgen Activity');
     }
 
     // 4. Domain 3: Ultrasound Information
-    bool hasUltrasoundDomain = false;
     if (input.ultrasoundSource == UltrasoundSource.clinicianConfirmedReport ||
         input.ultrasoundSource == UltrasoundSource.userReportedHistory) {
-      hasUltrasoundDomain = true;
       domainsWithIndicators.add('Ultrasound Information');
     }
 
